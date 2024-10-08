@@ -21,12 +21,12 @@ export function TranslatorApplication() {
   const [APIvalue, setAPIValue] = useState("")
   const [baseUrlValue, setBaseUrlValue] = useState(undefined)
   const [fromLanguage, setFromLanguage] = useState("")
-  const [toLanguage, setToLanguage] = useState("English")
+  const [toLanguage, setToLanguage] = useState("Chinese")
   const [systemInstruction, setSystemInstruction] = useState("")
   const [model, setModel] = useState("gpt-4o-mini")
   const [temperature, setTemperature] = useState(0)
   const [batchSizes, setBatchSizes] = useState([10, 50])
-  const [useModerator, setUseModerator] = useState(true)
+  const [useModerator, setUseModerator] = useState(false)
   const [useStructuredMode, setUseStructuredMode] = useState(true)
   const [rateLimit, setRateLimit] = useState(60)
   /** @type {React.MutableRefObject<HTMLInputElement>} */
@@ -44,7 +44,7 @@ export function TranslatorApplication() {
   /** @type {React.MutableRefObject<Translator>} */
   const translatorRef = useRef(null)
   const translatorRunningRef = useRef(false)
-
+  const exportFileName = useRef("output.srt")
   // Translator Stats
   const [usageInformation, setUsageInformation] = useState(/** @type {typeof Translator.prototype.usage}*/(null))
   const [RPMInfomation, setRPMInformation] = useState(0)
@@ -365,8 +365,9 @@ export function TranslatorApplication() {
 
         <div className='w-full justify-between md:justify-center flex flex-wrap gap-1 sm:gap-4 mt-auto sticky top-0 backdrop-blur px-4 pt-4'>
           <FileUploadButton label={"Import SRT"} onFileSelect={async (file) => {
-            // console.log("File", file);
+            console.log("File", file);
             try {
+              exportFileName.current = 'trans_'+file.name
               const text = await file.text()
               const parsed = subtitleParser.fromSrt(text)
               setSrtInputText(text)
@@ -389,7 +390,7 @@ export function TranslatorApplication() {
 
           <Button color="primary" onClick={() => {
             // console.log(srtOutputText)
-            downloadString(srtOutputText, "text/plain", "export.srt")
+            downloadString(srtOutputText, "text/plain", exportFileName.current)
           }}>
             Export SRT
           </Button>
