@@ -1,5 +1,5 @@
-export function downloadString(text, fileType, fileName) {
-  const outputText = processSrt(text,42);
+export function downloadString(text, fileType, fileName, maxLineLength) {
+  const outputText = processSrt(text,maxLineLength);
   console.log('处理完字幕',outputText)
   console.log('原始字幕',text)
   var blob = new Blob([outputText], { type: fileType });
@@ -61,10 +61,10 @@ function processSrt(inputText, maxLineLength = 42, chineseRatio = 0.5) {
 }
 
 /**
- * 分割字幕文本，避免拆分英文单词，中文按字符分割
+ * 分割字幕文本，优先按标点符号切割，没有标点符号时根据字符长度切割（不拆分单词）
  * @param {string} text 字幕文本
  * @param {number} maxLineLength 每行的最大英文字符数
- * @param {number} chineseRatio 中文字幕长度比例
+ * @param {number} chineseRatio 中文字符长度比例
  * @returns {string[]} 分割后的字幕行数组
  */
 function splitSubtitle(text, maxLineLength, chineseRatio) {
@@ -75,36 +75,65 @@ function splitSubtitle(text, maxLineLength, chineseRatio) {
   const isChinese = /[\u4e00-\u9fa5]/.test(text);
   const maxLineLengthForText = isChinese ? Math.floor(maxLineLength * chineseRatio) : maxLineLength;
 
-  if (isChinese) {
-    // 对于中文，按照字符进行分割
-    for (let i = 0; i < text.length; i++) {
-      currentLine += text[i];
-      if (currentLine.length >= maxLineLengthForText) {
+  // 优先按标点符号切割
+  const punctuation = isChinese ? /[，。！？；]/ : /[.,!?;]/;
+  const segments = text.split(punctuation);
+
+  segments.forEach((segment, index) => {
+    const punctuationMatch = text.match(punctuation);
+
+    // 如果当前分段长度不超过最大行长度，直接加入
+    if ((currentLine + segment).length <= maxLineLengthForText) {
+      currentLine += segment + (punctuationMatch && punctuationMatch[index] ? punctuationMatch[index] : '');
+    } else {
+      // 如果当前分段超长，处理为多行
+      if (currentLine) {
         lines.push(currentLine.trim());
         currentLine = '';
       }
-    }
-    if (currentLine.trim()) {
-      lines.push(currentLine.trim());
-    }
-  } else {
-    // 对于英文，按照单词分割
-    const words = text.trim().split(' ');
-    words.forEach(word => {
-      if ((currentLine + word).length > maxLineLengthForText) {
-        lines.push(currentLine.trim());
-        currentLine = word + ' ';
-      } else {
-        currentLine += word + ' ';
+
+      // 根据长度分割，不拆分单词
+      let subSegment = segment;
+      while (subSegment.length > maxLineLengthForText) {
+        // 找到适合的分割点（不拆分单词）
+        const slicePoint = findWordBoundary(subSegment, maxLineLengthForText);
+        lines.push(subSegment.slice(0, slicePoint).trim());
+        subSegment = subSegment.slice(slicePoint).trim();
       }
-    });
-    if (currentLine.trim()) {
-      lines.push(currentLine.trim());
+      currentLine = subSegment;
     }
+  });
+
+  if (currentLine.trim()) {
+    lines.push(currentLine.trim());
   }
 
   return lines;
 }
+
+/**
+ * 找到适合的分割点，确保不拆分单词
+ * @param {string} text 文本
+ * @param {number} maxLength 最大字符长度
+ * @returns {number} 返回适合的分割点
+ */
+function findWordBoundary(text, maxLength) {
+  // 如果文本长度已经小于最大长度，直接返回文本长度
+  if (text.length <= maxLength) {
+    return text.length;
+  }
+
+  // 尝试在 maxLength 附近找到单词边界（空格）
+  let slicePoint = text.lastIndexOf(' ', maxLength);
+  
+  // 如果没有找到合适的空格，默认返回 maxLength
+  if (slicePoint === -1) {
+    return maxLength;
+  }
+  
+  return slicePoint;
+}
+
 
 /**
  * 计算时间戳，将时间字符串转换为秒数

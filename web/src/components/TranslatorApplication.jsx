@@ -15,6 +15,7 @@ import { Translator, TranslatorStructuredArray, subtitleParser, createOpenAIClie
 const OPENAI_API_KEY = "OPENAI_API_KEY"
 const OPENAI_BASE_URL = "OPENAI_BASE_URL"
 const RATE_LIMIT = "RATE_LIMIT"
+const MAX_LINE_LENGTH = "MAX_LINE_LENGTH"
 
 export function TranslatorApplication() {
   // Translator Configuration
@@ -29,6 +30,7 @@ export function TranslatorApplication() {
   const [useModerator, setUseModerator] = useState(false)
   const [useStructuredMode, setUseStructuredMode] = useState(true)
   const [rateLimit, setRateLimit] = useState(60)
+  const [maxLineLength, setMaxLineLength] = useState(45)
   /** @type {React.MutableRefObject<HTMLInputElement>} */
   const configSection = useRef()
   const [isAPIInputVisible, setIsAPIInputVisible] = useState(false)
@@ -53,6 +55,7 @@ export function TranslatorApplication() {
   useEffect(() => {
     setAPIValue(localStorage.getItem(OPENAI_API_KEY) ?? "")
     setRateLimit(Number(localStorage.getItem(RATE_LIMIT) ?? rateLimit))
+    setMaxLineLength(Number(localStorage.getItem(MAX_LINE_LENGTH) ?? maxLineLength))
     setBaseUrlWithModerator(localStorage.getItem(OPENAI_BASE_URL) ?? undefined)
   }, [])
 
@@ -355,6 +358,21 @@ export function TranslatorApplication() {
                           </div>
                         }
                       />
+                      <Input
+                        className='w-full md:w-6/12'
+                        size='sm'
+                        type="number"
+                        min="1"
+                        label="Max Line Length"
+                        value={maxLineLength.toString()}
+                        onValueChange={(value) => setMaxLineLength(Number(value))}
+                        autoComplete='on'
+                        // endContent={
+                        //   <div className="pointer-events-none flex items-center">
+                        //     <span className="text-default-400 text-small">Word</span>
+                        //   </div>
+                        // }
+                      />
                     </div>
                   </div>
                 </div>
@@ -390,7 +408,7 @@ export function TranslatorApplication() {
 
           <Button color="primary" onClick={() => {
             // console.log(srtOutputText)
-            downloadString(srtOutputText, "text/plain", exportFileName.current)
+            downloadString(srtOutputText, "text/plain", exportFileName.current, maxLineLength)
           }}>
             Export SRT
           </Button>
