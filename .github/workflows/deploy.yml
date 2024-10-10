@@ -30,4 +30,4 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./web/chatgpt-subtitle-translator
-          artifact_name: github-pages
+          branch: gh-pages  # 如果你想发布到 gh-pages 分支
