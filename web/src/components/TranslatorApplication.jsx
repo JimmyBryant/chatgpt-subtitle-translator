@@ -381,7 +381,7 @@ export function TranslatorApplication() {
           </div>
         </form>
 
-        <div className='w-full justify-between md:justify-center flex flex-wrap gap-1 sm:gap-4 mt-auto sticky top-0 backdrop-blur px-4 pt-4'>
+        <div className='w-full justify-between md:justify-center items-center flex flex-wrap gap-1 sm:gap-4 mt-auto sticky top-0 backdrop-blur px-4 pt-4'>
           <FileUploadButton label={"Import SRT"} onFileSelect={async (file) => {
             console.log("File", file);
             try {
