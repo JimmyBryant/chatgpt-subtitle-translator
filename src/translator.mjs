@@ -1,3 +1,4 @@
+import log from "loglevel"
 import { openaiRetryWrapper, completeChatStream, getPricingModel } from './openai.mjs';
 import { checkModeration } from './moderator.mjs';
 import { splitStringByNumberLabel } from './subtitle.mjs';
@@ -32,6 +33,8 @@ import { TranslationOutput } from './translatorOutput.mjs';
  * Enforce one to one line quantity input output matching
  * @property {number} historyPromptLength `10` \
  * Length of the prompt history to be retained and passed over to the next translation request in order to maintain some context.
+ * @property {boolean} useFullContext
+ * Use the full history, chunked by historyPromptLength, to work better with prompt caching.
  * @property {number[]} batchSizes `[10, 100]` \
  * The number of lines to include in each translation prompt, provided that they are estimated to within the token limit. 
  * In case of mismatched output line quantities, this number will be decreased step-by-step according to the values in the array, ultimately reaching one.
@@ -42,6 +45,7 @@ import { TranslationOutput } from './translatorOutput.mjs';
  * @property {number} max_token
  * @property {number} inputMultiplier
  * @property {string} fallbackModel
+ * @property {import('loglevel').LogLevelDesc} logLevel
  */
 export const DefaultOptions = {
     createChatCompletionRequest: {
@@ -53,11 +57,13 @@ export const DefaultOptions = {
     prefixNumber: true,
     lineMatching: true,
     historyPromptLength: 10,
+    useFullContext: false,
     batchSizes: [10, 100],
     structuredMode: false,
     max_token: 0,
     inputMultiplier: 0,
     fallbackModel: undefined,
+    logLevel: undefined
 }
 /**
  * Translator using ChatGPT
@@ -84,6 +90,7 @@ export class Translator
         this.workingProgress = []
         this.promptTokensUsed = 0
         this.promptTokensWasted = 0
+        this.cachedTokens = 0
         this.completionTokensUsed = 0
         this.completionTokensWasted = 0
         this.tokensProcessTimeMs = 0
@@ -97,6 +104,11 @@ export class Translator
 
         this.pricingModel = getPricingModel(this.options.createChatCompletionRequest.model)
         this.aborted = false
+
+        if (options.logLevel)
+        {
+            log.setLevel(options.logLevel)
+        }
     }
 
     /**
@@ -164,7 +176,8 @@ export class Translator
                     getOutput(promptResponse.choices[0].message.content),
                     promptResponse.usage?.prompt_tokens,
                     promptResponse.usage?.completion_tokens,
-                    promptResponse.usage?.total_tokens
+                    promptResponse.usage?.prompt_tokens_details?.cached_tokens,
+                    promptResponse.usage?.total_tokens,
                 )
                 return output
             }
@@ -214,10 +227,14 @@ export class Translator
                 })
                 const prompt_tokens = usage?.prompt_tokens
                 const completion_tokens = usage?.completion_tokens
+                const cached_tokens = usage?.prompt_tokens_details?.cached_tokens
+                const total_tokens = usage?.total_tokens
                 const output = new TranslationOutput(
                     getOutput(streamOutput),
                     prompt_tokens,
-                    completion_tokens
+                    completion_tokens,
+                    cached_tokens,
+                    total_tokens
                 )
                 return output
             }
@@ -225,6 +242,7 @@ export class Translator
 
         this.promptTokensUsed += response.promptTokens
         this.completionTokensUsed += response.completionTokens
+        this.cachedTokens += response.cachedTokens
         this.tokensProcessTimeMs += (endTime - startTime)
         return response
     }
@@ -234,7 +252,7 @@ export class Translator
      */
     async * translateSingle(batch)
     {
-        console.error(`[Translator]`, "Single line mode")
+        log.debug(`[Translator]`, "Single line mode")
         batch = batch.slice(-this.currentBatchSize)
         for (let x = 0; x < batch.length; x++)
         {
@@ -252,7 +270,7 @@ export class Translator
      */
     async * translateLines(lines)
     {
-        console.error("[Translator]", "System Instruction:", this.systemInstruction)
+        log.debug("[Translator]", "System Instruction:", this.systemInstruction)
         this.aborted = false
         this.workingLines = lines
         const theEnd = this.end ?? lines.length
@@ -263,7 +281,7 @@ export class Translator
 
             if (this.options.useModerator && !this.services.moderationService)
             {
-                console.warn("[Translator]", "Moderation service requested but not configured, no moderation applied")
+                log.warn("[Translator]", "Moderation service requested but not configured, no moderation applied")
             }
 
             if (this.options.useModerator && this.services.moderationService)
@@ -288,7 +306,7 @@ export class Translator
 
             if (this.aborted)
             {
-                console.error("[Translator]", "Aborted")
+                log.debug("[Translator]", "Aborted")
                 return
             }
 
@@ -301,15 +319,15 @@ export class Translator
 
                 if (output.refusal) 
                 {
-                    console.error(`[Translator]`, "Refusal: ", output.refusal)
+                    log.debug(`[Translator]`, "Refusal: ", output.refusal)
                 }
                 else
                 {
-                    console.error(`[Translator]`, "Lines count mismatch", batch.length, outputs.length)
+                    log.debug(`[Translator]`, "Lines count mismatch", batch.length, outputs.length)
                 }
 
-                console.error(`[Translator]`, "batch", batch)
-                console.error(`[Translator]`, "transformed", outputs)
+                log.debug(`[Translator]`, "batch", batch)
+                log.debug(`[Translator]`, "transformed", outputs)
 
                 if (this.changeBatchSize("decrease"))
                 {
@@ -364,7 +382,7 @@ export class Translator
                 const expectedLabel = workingIndex + 1
                 if (expectedLabel !== splits.number)
                 {
-                    console.warn("[Translator]", "Label mismatch", expectedLabel, splits.number)
+                    log.warn("[Translator]", "Label mismatch", expectedLabel, splits.number)
                     this.moderatorFlags.set(workingIndex, { remarks: "Label Mismatch", outIndex: splits.number })
                     finalTransform = `[Flagged][Model] ${originalSource} -> ${finalTransform}`
                 }
@@ -445,7 +463,7 @@ export class Translator
         {
             this.batchSizeThreshold = Math.floor(Math.max(old, this.currentBatchSize) / Math.min(old, this.currentBatchSize))
         }
-        console.error("[Translator]", "BatchSize", mode, old, "->", this.currentBatchSize, "SizeThreshold", this.batchSizeThreshold)
+        log.debug("[Translator]", "BatchSize", mode, old, "->", this.currentBatchSize, "SizeThreshold", this.batchSizeThreshold)
         return true
     }
 
@@ -453,10 +471,20 @@ export class Translator
     {
         if (this.workingProgress.length === 0 || this.options.historyPromptLength === 0)
         {
-            return
+            return;
         }
-        const sliced = this.workingProgress.slice(-this.options.historyPromptLength)
-        const offset = this.workingProgress.length - this.options.historyPromptLength
+
+        let sliced;
+        if (this.options.useFullContext)
+        {
+            // Use the entire workingProgress if useFullContext is true
+            sliced = this.workingProgress;
+        } else
+        {
+            // Otherwise, slice based on historyPromptLength
+            sliced = this.workingProgress.slice(-this.options.historyPromptLength);
+        }
+        const offset = this.workingProgress.length - sliced.length;
 
         /**
          * @param {string} text
@@ -464,20 +492,19 @@ export class Translator
          */
         const checkFlaggedMapper = (text, index) =>
         {
-            const id = index + (offset < 0 ? 0 : offset)
+            const id = index + (offset < 0 ? 0 : offset);
             if (this.moderatorFlags.has(id))
             {
-                // console.error("[Translator]", "Prompt Flagged", id, text)
-                return this.preprocessLine("-", id, 0)
+                // log.warn("[Translator]", "Prompt Flagged", id, text)
+                return this.preprocessLine("-", id, 0);
             }
-            return text
-        }
+            return text;
+        };
 
-        const checkedSource = sliced.map((x, i) => checkFlaggedMapper(x.source, i))
-        const checkedTransform = sliced.map((x, i) => checkFlaggedMapper(x.transform, i))
-        this.promptContext = this.getContext(checkedSource, checkedTransform)
+        const checkedSource = sliced.map((x, i) => checkFlaggedMapper(x.source, i));
+        const checkedTransform = sliced.map((x, i) => checkFlaggedMapper(x.transform, i));
+        this.promptContext = this.getContext(checkedSource, checkedTransform);
     }
-
 
     /**
      * @param {string[]} sourceLines
@@ -485,11 +512,24 @@ export class Translator
      */
     getContext(sourceLines, transformLines)
     {
-        return  /** @type {import('openai').OpenAI.Chat.ChatCompletionMessage[]}*/ ([
-            { role: "user", content: this.getContextLines(sourceLines, "user") },
-            { role: "assistant", content: this.getContextLines(transformLines, "assistant") }
-        ])
+        const chunks = [];
+        const chunkSize = this.options.historyPromptLength;
+        for (let i = 0; i < sourceLines.length; i += chunkSize)
+        {
+            const sourceChunk = sourceLines.slice(i, i + chunkSize);
+            const transformChunk = transformLines.slice(i, i + chunkSize);
+            chunks.push({
+                role: "user",
+                content: this.getContextLines(sourceChunk, "user")
+            });
+            chunks.push({
+                role: "assistant",
+                content: this.getContextLines(transformChunk, "assistant")
+            });
+        }
+        return /** @type {import('openai').OpenAI.Chat.ChatCompletionMessage[]}*/ (chunks);
     }
+
 
     /**
      * @param {string[]} lines 
@@ -514,12 +554,14 @@ export class Translator
         const wastedTokensPricing = roundWithPrecision(this.pricingModel.prompt * (this.promptTokensWasted / 1000) + this.pricingModel.completion * (this.completionTokensWasted / 1000), 3)
         const rate = roundWithPrecision(usedTokens / (this.tokensProcessTimeMs / 1000 / 60), 2)
         const wastedPercent = (wastedTokens / usedTokens).toLocaleString(undefined, { style: 'percent', minimumFractionDigits: 0 })
+        const cachedTokens = this.cachedTokens
         return {
             usedTokens,
             wastedTokens,
             usedTokensPricing,
             wastedTokensPricing,
             wastedPercent,
+            cachedTokens,
             rate,
         }
     }
@@ -529,7 +571,7 @@ export class Translator
         const usage = this.usage
         if (!usage)
         {
-            console.warn("[Translator]", `Cost computation not supported yet for ${this.options.createChatCompletionRequest.model}`)
+            log.warn("[Translator]", `Cost computation not supported yet for ${this.options.createChatCompletionRequest.model}`)
             return
         }
 
@@ -541,20 +583,22 @@ export class Translator
             usedTokensPricing,
             wastedTokensPricing,
             wastedPercent,
+            cachedTokens,
             rate,
         } = usage
 
-        console.error(
+        log.debug(
             `[Translator] Estimated Usage -`,
             "Tokens:", usedTokens, "$", usedTokensPricing,
             "Wasted:", wastedTokens, "$", wastedTokensPricing, wastedPercent,
-            "Rate:", rate, "TPM", this.services.cooler?.rate, "RPM"
+            "Cached:", cachedTokens,
+            "Rate:", rate, "TPM", this.services.cooler?.rate, "RPM",
         )
     }
 
     abort()
     {
-        console.error("[Translator]", "Aborting")
+        log.warn("[Translator]", "Aborting")
         this.streamController?.abort()
         this.aborted = true
     }
