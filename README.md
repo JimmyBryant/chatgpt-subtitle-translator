@@ -7,7 +7,8 @@ This utility uses the OpenAI ChatGPT API to translate text, with a specific focu
 
 ## Features
 - Web User Interface (Web UI) and Command Line Interface (CLI)  
-- **New experimental approach**: [Structured output](https://openai.com/index/introducing-structured-outputs-in-the-api/) for more concise results, enabled with `--experimental-structured-mode` in CLI  
+- **New**: Supports [Structured output](https://openai.com/index/introducing-structured-outputs-in-the-api/): for more concise results, available in the Web UI and in CLI with `--experimental-structured-mode`.
+- **New**: Supports [Prompt caching](https://openai.com/index/api-prompt-caching/), by including the full context of translated data, the system instruction and translation context are packaged to work well with prompt caching, enabled with `--experimental-use-full-context` (CLI only).
 - Line-based batching: avoiding token limit per request, reducing overhead token wastage, maintaining translation context to certain extent  
 - Checking with the free OpenAI Moderation tool: prevent token wastage if the model is highly likely to refuse to translate  
 - Streaming process output  
@@ -72,18 +73,29 @@ Options:
   - `-l, --history-prompt-length <length>`  
     Length of prompt history to retain for next request batch (default: 10)
   - `-b, --batch-sizes <sizes>` 
-    Batch sizes of increasing order for translation prompt slices in JSON Array (default: `"[10, 100]"`)
+    Batch sizes of increasing order for translation prompt slices in JSON Array (default: `"[10,100]"`)  
 
     The number of lines to include in each translation prompt, provided that they are estimated to within the token limit. 
     In case of mismatched output line quantities, this number will be decreased step-by-step according to the values in the array, ultimately reaching one.
     
     Larger batch sizes generally lead to more efficient token utilization and potentially better contextual translation. 
     However, mismatched output line quantities or exceeding the token limit will cause token wastage, requiring resubmission of the batch with a smaller batch size.
-  - `--experimental-structured-mode [mode]`
-    Enable structured response formats as outlined by https://openai.com/index/introducing-structured-outputs-in-the-api/. (default: `array`, choices `array`, `object`)
-      - `--experimental-structured-mode array` Structures the input and output into plain array format. This option is more concise as compared to base mode, though uses slightly more tokens per batch.
-      - `--experimental-structured-mode object` Structures both the input and output into a dynamically generated object schema based on input values. This option is even more concise and uses fewer tokens, but the batch has to be smaller, and is slow and unreliable. Due to its unreliability, it may lead to more resubmission retries, potentially wasting more tokens in the process. 
-
+  - `--experimental-structured-mode [mode]`  
+    Enable [structured response](https://openai.com/index/introducing-structured-outputs-in-the-api/). (default: `array`, choices `array`, `object`)
+      - `--experimental-structured-mode array` Structures the input and output into a plain array format. This option is more concise compared to base mode, though it uses slightly more tokens per batch.
+      - `--experimental-structured-mode object` Structures both the input and output into a dynamically generated object schema based on input values. This option is even more concise and uses fewer tokens, but requires smaller batch sizes and can be slow and unreliable. Due to its unreliability, it may lead to more resubmission retries, potentially wasting more tokens in the process.
+  - `--experimental-use-full-context`  
+    Include the full context of translated data to work well with [prompt caching](https://openai.com/index/api-prompt-caching/).  
+    
+    The translated lines per user and assistant message pairs are sliced as defined by `--history-prompt-length` (by default `--history-prompt-length 10`), it is recommended to set this to the largest batch size (by default `--batch-sizes "[10,100]"`): `--history-prompt-length 100`.  
+    
+    Enabling this may risk running into the model's context window limit, typically `128K`, but should be sufficient for most cases.
+  - `--log-level <level>`  
+    Log level (default: `debug`, choices: `trace`, `debug`, `info`, `warn`, `error`, `silent`)
+  - `--silent`  
+    Same as `--log-level silent`  
+  - `--quiet`  
+    Same as `--log-level silent`  
 
 Additional Options for GPT:  
   - `-m, --model <model>`  
