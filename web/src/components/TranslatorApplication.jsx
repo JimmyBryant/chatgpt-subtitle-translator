@@ -189,7 +189,18 @@ export function TranslatorApplication() {
       translatorRef.current.abort()
     }
   }
-
+  // 修正时间格式函数
+  function fixSrtTimeFormat(srtText) {
+    return srtText.replace(/(\d+):(\d+):(\d+),(\d+)/g, (_, h, m, s, ms) => {
+      // 补全小时、分钟、秒的前导零
+      const hours = h.padStart(2, "0");
+      const minutes = m.padStart(2, "0");
+      const seconds = s.padStart(2, "0");
+      // 毫秒补全三位
+      const milliseconds = ms.padStart(3, "0");
+      return `${hours}:${minutes}:${seconds},${milliseconds}`;
+    });
+  }
   return (
     <>
       <div className='w-full'>
@@ -367,11 +378,11 @@ export function TranslatorApplication() {
                         value={maxLineLength.toString()}
                         onValueChange={(value) => setMaxLineLength(Number(value))}
                         autoComplete='on'
-                        // endContent={
-                        //   <div className="pointer-events-none flex items-center">
-                        //     <span className="text-default-400 text-small">Word</span>
-                        //   </div>
-                        // }
+                      // endContent={
+                      //   <div className="pointer-events-none flex items-center">
+                      //     <span className="text-default-400 text-small">Word</span>
+                      //   </div>
+                      // }
                       />
                     </div>
                   </div>
@@ -385,9 +396,11 @@ export function TranslatorApplication() {
           <FileUploadButton label={"Import SRT"} onFileSelect={async (file) => {
             console.log("File", file);
             try {
-              exportFileName.current = 'trans_'+file.name
-              const text = await file.text()
+              exportFileName.current = 'trans_' + file.name
+              let text = await file.text()
+              text = fixSrtTimeFormat(text)
               const parsed = subtitleParser.fromSrt(text)
+
               setSrtInputText(text)
               setInputs(parsed.map(x => x.text))
             } catch (error) {
